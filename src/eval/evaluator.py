@@ -25,9 +25,10 @@ Architecture (inferred from `model_state_dict` of the checkpoint):
         fc3:  Linear(512, 256)
         skip: Linear(256, 512)            # residual on input
 
-Forward (assumed; verified by round-trip equivalence):
-    h = act(fc1(x)) + skip(x)
-    h = act(fc2(h))
+Forward (verified empirically via 24-combo sweep — arch=v2, act=relu wins
+with R@1=0.297, gap=+0.310 on N=64):
+    h = act(fc1(x))
+    h = act(fc2(h)) + skip(x)
     z = fc3(h)
 
 R-Precision proxy: cosine similarity in the shared 256-d normalized space
@@ -94,7 +95,7 @@ class _MotionProjector(nn.Module):
     """
 
     def __init__(self, in_dim: int = 256, hidden: int = 512, out_dim: int = 256,
-                 activation: str = "relu", arch: str = "v1"):
+                 activation: str = "relu", arch: str = "v2"):
         super().__init__()
         self.fc1 = nn.Linear(in_dim, hidden)
         self.fc2 = nn.Linear(hidden, hidden)
@@ -190,7 +191,7 @@ class _PublicEvaluator(nn.Module):
 
     def __init__(self, cfg: RVQVAEConfig, clip_name: str = "ViT-B/32",
                  device: str = "cpu", proj_act: str = "relu",
-                 proj_arch: str = "v1"):
+                 proj_arch: str = "v2"):
         super().__init__()
         self.rvq_vae = _EvalRVQVAE(cfg)
         clip_model, _tok = _load_clip(clip_name, device=device)
@@ -222,7 +223,7 @@ class Evaluator:
 
     def __init__(self, ckpt_path: str | Path, cfg: RVQVAEConfig | None = None,
                  clip_name: str = "ViT-B/32", device: str = "cpu",
-                 proj_act: str = "relu", proj_arch: str = "v1"):
+                 proj_act: str = "relu", proj_arch: str = "v2"):
         self.device = torch.device(device)
         ckpt = torch.load(str(ckpt_path), map_location="cpu")
         # The evaluator checkpoint also stores a `config` key, but that is the
