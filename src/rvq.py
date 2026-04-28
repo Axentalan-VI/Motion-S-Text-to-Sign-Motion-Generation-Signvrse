@@ -37,9 +37,28 @@ import torch.nn as nn
 from src.constants import RVQ_VAE_CKPT
 
 
-def _act() -> nn.Module:
-    # LeakyReLU(0.2) is the common motion-VAE choice; no params either way.
-    return nn.LeakyReLU(0.2, inplace=True)
+def _make_act(name: str = "leaky_relu") -> nn.Module:
+    """Activation slot (between Conv and BN). The checkpoint stores no params
+    here, so we have to guess. Common choices for motion VAEs:
+        leaky_relu (0.2), relu, gelu, silu, elu, tanh.
+    Use the `activation` arg on FrozenRVQVAE / RVQVAEConfig to override.
+    """
+    name = name.lower()
+    if name in ("leaky_relu", "leakyrelu"):
+        return nn.LeakyReLU(0.2, inplace=True)
+    if name == "relu":
+        return nn.ReLU(inplace=True)
+    if name == "gelu":
+        return nn.GELU()
+    if name == "silu" or name == "swish":
+        return nn.SiLU(inplace=True)
+    if name == "elu":
+        return nn.ELU(inplace=True)
+    if name == "tanh":
+        return nn.Tanh()
+    if name == "identity" or name == "none":
+        return nn.Identity()
+    raise ValueError(f"unknown activation: {name}")
 
 
 # ─── encoder / decoder ───────────────────────────────────────────────────────
@@ -52,7 +71,7 @@ class _Encoder(nn.Module):
 
     def __init__(self, input_dim: int, hidden: int, latent_dim: int,
                  strides: tuple[int, int, int, int] = (1, 2, 1, 2),
-                 kernel: int = 3):
+                 kernel: int = 3, activation: str = "leaky_relu"):
         super().__init__()
         pad = kernel // 2
         c_in_out = [
@@ -65,7 +84,7 @@ class _Encoder(nn.Module):
         for (cin, cout), s in zip(c_in_out, strides):
             layers += [
                 nn.Conv1d(cin, cout, kernel_size=kernel, stride=s, padding=pad),
-                _act(),
+                _make_act(activation),
                 nn.BatchNorm1d(cout),
             ]
         self.encoder = nn.Sequential(*layers)
@@ -82,7 +101,7 @@ class _Decoder(nn.Module):
 
     def __init__(self, latent_dim: int, hidden: int, output_dim: int,
                  strides: tuple[int, int, int, int] = (1, 2, 1, 2),
-                 kernel: int = 3):
+                 kernel: int = 3, activation: str = "leaky_relu"):
         super().__init__()
         pad = kernel // 2
         c_in_out = [
@@ -101,7 +120,7 @@ class _Decoder(nn.Module):
                     cin, cout, kernel_size=kernel, stride=s,
                     padding=pad, output_padding=(s - 1),
                 ),
-                _act(),
+                _make_act(activation),
             ]
             # No BatchNorm after the final output projection (standard for VAE
             # decoders writing raw motion features). Checkpoint has slots 0..10
@@ -215,10 +234,14 @@ class FrozenRVQVAE(nn.Module):
     """
 
     def __init__(self, ckpt_path: str | Path = RVQ_VAE_CKPT,
-                 cfg: RVQVAEConfig | None = None):
+                 cfg: RVQVAEConfig | None = None,
+                 activation: str = "leaky_relu",
+                 strides: tuple[int, int, int, int] = (1, 2, 1, 2)):
         super().__init__()
         self.ckpt_path = Path(ckpt_path)
         self.cfg = cfg or RVQVAEConfig()
+        self.activation = activation
+        self.strides = strides
         self._loaded = False
         self._build()
 
@@ -227,6 +250,8 @@ class FrozenRVQVAE(nn.Module):
             input_dim=self.cfg.input_dim,
             hidden=self.cfg.hidden_dim,
             latent_dim=self.cfg.latent_dim,
+            strides=self.strides,
+            activation=self.activation,
         )
         self.rvq = _RVQ(
             num_quantizers=self.cfg.num_quantizers,
@@ -237,6 +262,8 @@ class FrozenRVQVAE(nn.Module):
             latent_dim=self.cfg.latent_dim,
             hidden=self.cfg.hidden_dim,
             output_dim=self.cfg.output_dim,
+            strides=self.strides,
+            activation=self.activation,
         )
 
     # convenience ------------------------------------------------------------
