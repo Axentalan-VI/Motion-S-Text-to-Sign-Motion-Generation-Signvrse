@@ -30,16 +30,18 @@ _STRIDE_PATTERNS = [
     (1, 2, 2, 1),
     (2, 1, 1, 2),
 ]
-_ACTIVATIONS = ["leaky_relu", "relu", "gelu", "silu", "elu", "tanh", "identity"]
+_ACTIVATIONS = ["leaky_relu", "relu", "gelu", "silu", "elu", "selu", "mish",
+                "hardswish", "hardtanh", "softplus", "tanh", "identity"]
+_CODEBOOK_SOURCES = ["embedding", "embedding_avg"]
 
 
 def _eval_config(activation: str, strides: tuple[int, int, int, int],
-                 rows: list, device: str, ckpt: str) -> tuple[bool, float, list[float]]:
-    """Build model with given (activation, strides), load, decode+re-encode rows.
-    Returns (all_decode_shapes_ok, mean_layer0_agreement, per_row_agreements).
-    """
+                 rows: list, device: str, ckpt: str,
+                 codebook_source: str = "embedding") -> tuple[bool, float, list[float]]:
+    """Build model, load, decode+re-encode rows. Returns (shapes_ok, mean_agreement, per_row)."""
     try:
-        model = FrozenRVQVAE(ckpt_path=ckpt, activation=activation, strides=strides)
+        model = FrozenRVQVAE(ckpt_path=ckpt, activation=activation,
+                             strides=strides, codebook_source=codebook_source)
         model.load(device=device, strict=True)
     except Exception as e:
         print(f"  [load FAILED] {type(e).__name__}: {e}")
@@ -75,9 +77,11 @@ def main() -> None:
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--strides", type=str, default="1,2,1,2")
     p.add_argument("--activation", type=str, default="leaky_relu")
+    p.add_argument("--codebook", type=str, default="embedding",
+                   choices=["embedding", "embedding_avg"])
     p.add_argument("--ckpt", type=str, default=str(RVQ_VAE_CKPT))
     p.add_argument("--sweep", action="store_true",
-                   help="try all (activation, strides) combinations and report the best")
+                   help="try all (activation x stride x codebook) combinations")
     args = p.parse_args()
 
     torch.manual_seed(args.seed); np.random.seed(args.seed)
@@ -94,32 +98,35 @@ def main() -> None:
     print(f"[data] picked {list(pick)}  seq_lens: {df.iloc[pick]['seq_len'].tolist()}")
 
     if args.sweep:
-        print("[sweep] trying all (activation x stride) combinations ...")
-        results: list[tuple[float, str, tuple, bool]] = []
-        for act, strides in itertools.product(_ACTIVATIONS, _STRIDE_PATTERNS):
+        print("[sweep] trying all (codebook x activation x stride) combinations ...")
+        results: list[tuple[float, str, str, tuple, bool]] = []
+        for cb, act, strides in itertools.product(_CODEBOOK_SOURCES, _ACTIVATIONS, _STRIDE_PATTERNS):
             t0 = time.time()
-            ok, avg, _ = _eval_config(act, strides, rows, args.device, args.ckpt)
+            ok, avg, _ = _eval_config(act, strides, rows, args.device, args.ckpt, codebook_source=cb)
             dt = time.time() - t0
             tag = "OK  " if ok else "BAD "
-            print(f"  {tag} act={act:<10} strides={strides}  agreement={avg:.3f}  ({dt:.1f}s)")
-            results.append((avg, act, strides, ok))
+            print(f"  {tag} cb={cb:<14} act={act:<10} strides={strides}  agreement={avg:.3f}  ({dt:.1f}s)")
+            results.append((avg, cb, act, strides, ok))
         results.sort(reverse=True)
-        print("\n[sweep] top 5:")
-        for avg, act, strides, ok in results[:5]:
-            print(f"  agreement={avg:.3f}  act={act:<10} strides={strides}  shapes_ok={ok}")
+        print("\n[sweep] top 10:")
+        for avg, cb, act, strides, ok in results[:10]:
+            print(f"  agreement={avg:.3f}  cb={cb:<14} act={act:<10} strides={strides}  shapes_ok={ok}")
         best = results[0]
         if best[0] >= 0.95:
-            print(f"\n[WIN] activation='{best[1]}' strides={best[2]} -> agreement={best[0]:.3f}")
+            print(f"\n[WIN] cb='{best[1]}' act='{best[2]}' strides={best[3]} -> agreement={best[0]:.3f}")
         else:
-            print(f"\n[no clear winner] best agreement={best[0]:.3f}; architecture likely needs another tweak.")
+            print(f"\n[no clear winner] best agreement={best[0]:.3f}; "
+                  f"VQ-VAE round-trip may be inherently lossy. Use top config and "
+                  f"validate via the public evaluator instead.")
         return
 
     strides = tuple(int(x) for x in args.strides.split(","))
     assert len(strides) == 4 and int(np.prod(strides)) == 4
 
-    print(f"[load] {args.ckpt}  activation={args.activation}  strides={strides}")
+    print(f"[load] {args.ckpt}  cb={args.codebook}  activation={args.activation}  strides={strides}")
     t0 = time.time()
-    ok, avg, matches = _eval_config(args.activation, strides, rows, args.device, args.ckpt)
+    ok, avg, matches = _eval_config(args.activation, strides, rows, args.device,
+                                    args.ckpt, codebook_source=args.codebook)
     print(f"[done] {time.time()-t0:.2f}s  shapes_ok={ok}  layer0_agreement={avg:.3f}  per_row={matches}")
     if avg >= 0.95:
         print("  -> architecture is correct.")

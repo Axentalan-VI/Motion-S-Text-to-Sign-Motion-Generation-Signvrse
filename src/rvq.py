@@ -54,6 +54,18 @@ def _make_act(name: str = "leaky_relu") -> nn.Module:
         return nn.SiLU(inplace=True)
     if name == "elu":
         return nn.ELU(inplace=True)
+    if name == "selu":
+        return nn.SELU(inplace=True)
+    if name == "mish":
+        return nn.Mish(inplace=True)
+    if name == "hardswish":
+        return nn.Hardswish(inplace=True)
+    if name == "hardtanh":
+        return nn.Hardtanh(inplace=True)
+    if name == "softplus":
+        return nn.Softplus()
+    if name == "sigmoid":
+        return nn.Sigmoid()
     if name == "tanh":
         return nn.Tanh()
     if name == "identity" or name == "none":
@@ -137,24 +149,44 @@ class _Decoder(nn.Module):
 # ─── quantizer ───────────────────────────────────────────────────────────────
 class _ResidualVQLayer(nn.Module):
     """Single EMA VQ codebook. Stores `embedding` of shape (latent_dim, codebook_size)
-    plus `cluster_size` and `embedding_avg` (loaded but unused at inference).
+    plus `cluster_size` and `embedding_avg`.
+
+    `codebook_source`:
+        'embedding'        -> use `self.embedding` directly (default; assumes
+                              the trainer sync'd it from EMA at the end of training).
+        'embedding_avg'    -> use `embedding_avg / (cluster_size + eps)` as the
+                              codebook. Use this if 'embedding' looks stale.
     """
 
-    def __init__(self, latent_dim: int, codebook_size: int):
+    def __init__(self, latent_dim: int, codebook_size: int,
+                 codebook_source: str = "embedding", eps: float = 1e-5):
         super().__init__()
         self.register_buffer("embedding", torch.zeros(latent_dim, codebook_size))
         self.register_buffer("cluster_size", torch.zeros(codebook_size))
         self.register_buffer("embedding_avg", torch.zeros(latent_dim, codebook_size))
+        self.codebook_source = codebook_source
+        self.eps = eps
+
+    def _codebook(self) -> torch.Tensor:
+        """Return effective codebook of shape (D, K)."""
+        if self.codebook_source == "embedding":
+            return self.embedding
+        if self.codebook_source == "embedding_avg":
+            # Laplace smoothing as in the original VQ-VAE paper.
+            n = self.cluster_size.sum()
+            cs = (self.cluster_size + self.eps) / (n + self.embedding.shape[1] * self.eps) * n
+            return self.embedding_avg / cs.unsqueeze(0)
+        raise ValueError(f"unknown codebook_source: {self.codebook_source}")
 
     def lookup(self, idx: torch.Tensor) -> torch.Tensor:
         """idx: (B, T) long -> embeddings (B, D, T)."""
-        # embedding has shape (D, K). Index_select on dim=1 by flattened idx, then reshape.
         if idx.dim() != 2:
             raise ValueError(f"Unsupported idx shape: {tuple(idx.shape)}")
         B, T = idx.shape
+        emb = self._codebook()                                 # (D, K)
         flat = idx.reshape(-1)                                 # (B*T,)
-        sel = self.embedding.index_select(1, flat)             # (D, B*T)
-        D = self.embedding.shape[0]
+        sel = emb.index_select(1, flat)                        # (D, B*T)
+        D = emb.shape[0]
         out = sel.view(D, B, T).permute(1, 0, 2).contiguous()  # (B, D, T)
         return out
 
@@ -163,7 +195,7 @@ class _ResidualVQLayer(nn.Module):
         """z: (B, D, T) -> (z_q (B, D, T), idx (B, T))."""
         B, D, T = z.shape
         flat = z.permute(0, 2, 1).reshape(-1, D)               # (BT, D)
-        emb = self.embedding.t()                               # (K, D)
+        emb = self._codebook().t()                             # (K, D)
         d = (flat.pow(2).sum(1, keepdim=True)
              - 2 * flat @ emb.t()
              + emb.pow(2).sum(1)[None, :])
@@ -173,10 +205,12 @@ class _ResidualVQLayer(nn.Module):
 
 
 class _RVQ(nn.Module):
-    def __init__(self, num_quantizers: int, latent_dim: int, codebook_size: int):
+    def __init__(self, num_quantizers: int, latent_dim: int, codebook_size: int,
+                 codebook_source: str = "embedding"):
         super().__init__()
         self.quantizers = nn.ModuleList(
-            [_ResidualVQLayer(latent_dim, codebook_size) for _ in range(num_quantizers)]
+            [_ResidualVQLayer(latent_dim, codebook_size, codebook_source=codebook_source)
+             for _ in range(num_quantizers)]
         )
 
     def __len__(self) -> int:
@@ -236,12 +270,14 @@ class FrozenRVQVAE(nn.Module):
     def __init__(self, ckpt_path: str | Path = RVQ_VAE_CKPT,
                  cfg: RVQVAEConfig | None = None,
                  activation: str = "leaky_relu",
-                 strides: tuple[int, int, int, int] = (1, 2, 1, 2)):
+                 strides: tuple[int, int, int, int] = (1, 2, 1, 2),
+                 codebook_source: str = "embedding"):
         super().__init__()
         self.ckpt_path = Path(ckpt_path)
         self.cfg = cfg or RVQVAEConfig()
         self.activation = activation
         self.strides = strides
+        self.codebook_source = codebook_source
         self._loaded = False
         self._build()
 
@@ -257,6 +293,7 @@ class FrozenRVQVAE(nn.Module):
             num_quantizers=self.cfg.num_quantizers,
             latent_dim=self.cfg.latent_dim,
             codebook_size=self.cfg.num_embeddings,
+            codebook_source=self.codebook_source,
         )
         self.decoder = _Decoder(
             latent_dim=self.cfg.latent_dim,
