@@ -40,7 +40,7 @@ def _load_split() -> tuple[set[int], set[int]]:
 
 
 def _load_momask(ckpt_path: Path, model_cls, device: torch.device):
-    ckpt = torch.load(str(ckpt_path), map_location="cpu")
+    ckpt = torch.load(str(ckpt_path), map_location="cpu", weights_only=False)
     cfg = MoMaskConfig.from_dict(ckpt["config"])
     model = model_cls(cfg).to(device)
     model.load_state_dict(ckpt["model_state_dict"])
@@ -102,7 +102,7 @@ def main() -> None:
         len_model = LengthPredictor(num_bins=base_cfg.num_length_bins,
                                      backbone_name=backbone,
                                      freeze_backbone=True).to(device)
-        sd = torch.load(str(args.length_ckpt), map_location="cpu")
+        sd = torch.load(str(args.length_ckpt), map_location="cpu", weights_only=False)
         if "model_state_dict" in sd:
             sd = sd["model_state_dict"]
         len_model.load_state_dict(sd, strict=False)
