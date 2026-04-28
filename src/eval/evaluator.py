@@ -151,6 +151,16 @@ class _ClipWrap(nn.Module):
         self.clip_model = clip_model
 
 
+class _InfoNCELoss(nn.Module):
+    """Just holds the learnable log-temperature scalar from training. Not used
+    at eval, but registered so strict-loading the checkpoint succeeds.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.log_temp = nn.Parameter(torch.zeros(()))
+
+
 class _PublicEvaluator(nn.Module):
     """The full evaluator module, mirroring the checkpoint key structure
     so we can `load_state_dict(strict=True)`.
@@ -174,6 +184,7 @@ class _PublicEvaluator(nn.Module):
             nn.Linear(256, 256),     # 8
         )
         self.motion_projector = _MotionProjector(activation=proj_act)
+        self.infonce_loss = _InfoNCELoss()
 
 
 # ---------------------------------------------------------------------------
