@@ -55,7 +55,7 @@ def main() -> None:
     target = base[mask]; pred = logits[mask]
     loss = F.cross_entropy(pred, target)
     loss.backward()
-    print(f"[base] loss = {loss.item():.3f}  (random init ≈ ln(512) = 6.24)")
+    print(f"[base] loss = {loss.item():.3f}  (random init ~= ln(512) = 6.24)")
 
     # ── base: generate ───────────────────────────────────────────────────
     with torch.no_grad():
