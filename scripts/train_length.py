@@ -36,11 +36,11 @@ from src.length import (
 )
 
 
-def _load_split() -> tuple[list[int], list[int]]:
+def _load_split() -> tuple[set[int], set[int]]:
     if not SPLIT_FILE.exists():
         raise SystemExit(f"split file missing: {SPLIT_FILE}. Run `python -m scripts.make_split` first.")
     obj = json.loads(SPLIT_FILE.read_text())
-    return obj["train_idx"], obj["val_idx"]
+    return set(map(int, obj["train"])), set(map(int, obj["val"]))
 
 
 def _filter_in_range(seq_len: np.ndarray) -> np.ndarray:
@@ -77,8 +77,14 @@ def main() -> None:
     print(f"[data] {len(df)} rows, seq_len p50={df.seq_len.median():.0f} p95={df.seq_len.quantile(0.95):.0f}")
 
     train_idx, val_idx = _load_split()
-    train_df = df.iloc[train_idx].reset_index(drop=True)
-    val_df = df.iloc[val_idx].reset_index(drop=True)
+    if "id" not in df.columns:
+        raise SystemExit("train.csv has no 'id' column; cannot apply split.")
+    ids = df["id"].astype(int).to_numpy()
+    train_mask_split = np.fromiter((i in train_idx for i in ids), dtype=bool, count=len(ids))
+    val_mask_split   = np.fromiter((i in val_idx   for i in ids), dtype=bool, count=len(ids))
+    train_df = df[train_mask_split].reset_index(drop=True)
+    val_df   = df[val_mask_split].reset_index(drop=True)
+    print(f"[split] train={len(train_df)}  val={len(val_df)}  (covered {len(train_df)+len(val_df)}/{len(df)})")
 
     # filter to rows whose target is representable
     tmask = _filter_in_range(train_df["seq_len"].to_numpy())
