@@ -66,7 +66,9 @@ class _EvalRVQVAE(nn.Module):
         super().__init__()
         self.encoder = _Encoder(cfg.input_dim, cfg.hidden_dim, cfg.latent_dim,
                                 strides=strides, activation=activation)
-        self.rvq = _RVQ(cfg.latent_dim, cfg.num_quantizers, cfg.num_embeddings)
+        self.rvq = _RVQ(num_quantizers=cfg.num_quantizers,
+                        latent_dim=cfg.latent_dim,
+                        codebook_size=cfg.num_embeddings)
         self.decoder = _Decoder(cfg.latent_dim, cfg.hidden_dim, cfg.output_dim,
                                 strides=strides, activation=activation)
 
@@ -188,9 +190,12 @@ class Evaluator:
                  clip_name: str = "ViT-B/32", device: str = "cpu"):
         self.device = torch.device(device)
         ckpt = torch.load(str(ckpt_path), map_location="cpu")
+        # The evaluator checkpoint also stores a `config` key, but that is the
+        # *evaluator's* training config (loss weights, lr, etc.), NOT the
+        # RVQ-VAE architecture config. Always use the known-good RVQ defaults
+        # unless the caller explicitly passes one.
         if cfg is None:
-            file_cfg = ckpt.get("config", {})
-            cfg = RVQVAEConfig.from_dict(file_cfg) if file_cfg else RVQVAEConfig()
+            cfg = RVQVAEConfig()
         self.cfg = cfg
         self.module = _PublicEvaluator(cfg, clip_name=clip_name, device="cpu")
         sd = ckpt["model_state_dict"]
