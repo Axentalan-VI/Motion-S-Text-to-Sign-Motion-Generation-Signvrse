@@ -10,6 +10,7 @@ Outputs:
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import math
 from pathlib import Path
@@ -19,6 +20,26 @@ import pandas as pd
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
+
+
+class _EMA:
+    """Exponential moving average of model parameters."""
+    def __init__(self, model: torch.nn.Module, decay: float = 0.999):
+        self.decay = decay
+        self.shadow = {k: v.detach().clone() for k, v in model.state_dict().items()
+                       if v.dtype.is_floating_point}
+
+    @torch.no_grad()
+    def update(self, model: torch.nn.Module) -> None:
+        for k, v in model.state_dict().items():
+            if k in self.shadow:
+                self.shadow[k].mul_(self.decay).add_(v.detach(), alpha=1.0 - self.decay)
+
+    def state_dict_for(self, model: torch.nn.Module) -> dict:
+        sd = {k: v.detach().clone() for k, v in model.state_dict().items()}
+        for k, v in self.shadow.items():
+            sd[k] = v.clone()
+        return sd
 
 from src.constants import (
     CHECKPOINT_DIR, RUNS_DIR, SPLIT_FILE, TRAIN_CSV,
@@ -40,9 +61,13 @@ def _load_split() -> tuple[set[int], set[int]]:
 
 def main() -> None:
     p = argparse.ArgumentParser()
-    p.add_argument("--epochs", type=int, default=10)
+    p.add_argument("--epochs", type=int, default=30)
     p.add_argument("--batch-size", type=int, default=32)
     p.add_argument("--lr", type=float, default=2e-4)
+    p.add_argument("--resume", type=Path, default=None,
+                   help="Path to existing ckpt to resume from (loads weights only).")
+    p.add_argument("--ema", type=float, default=0.999,
+                   help="EMA decay (set 0 to disable).")
     p.add_argument("--weight-decay", type=float, default=0.01)
     p.add_argument("--num-bins", type=int, default=32)
     p.add_argument("--max-len", type=int, default=320)         # 99th pct ≈ 240; cap for speed
@@ -93,6 +118,15 @@ def main() -> None:
     model = BaseMaskTransformer(cfg).to(device)
     text_enc = FrozenTextEncoder(name=args.clip_name, device=str(device))
 
+    if args.resume is not None and Path(args.resume).exists():
+        ck = torch.load(str(args.resume), map_location="cpu", weights_only=False)
+        model.load_state_dict(ck["model_state_dict"])
+        print(f"[resume] loaded weights from {args.resume}")
+
+    ema = _EMA(model, decay=args.ema) if args.ema and args.ema > 0 else None
+    if ema is not None:
+        print(f"[ema] enabled, decay={args.ema}")
+
     n_params = sum(p.numel() for p in model.parameters())
     print(f"[model] BaseMaskTransformer params={n_params/1e6:.1f}M  cfg={cfg}")
 
@@ -134,6 +168,8 @@ def main() -> None:
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             opt.step(); sched.step()
+            if ema is not None:
+                ema.update(model)
 
             with torch.no_grad():
                 corr = (pred.argmax(-1) == target).float().sum().item()
@@ -148,8 +184,12 @@ def main() -> None:
         train_loss = sum_loss / max(1, sum_tok)
         train_acc  = sum_corr / max(1, sum_tok)
 
-        # ── val ───────────────────────────────────────────────────────────
+        # ── val (use EMA weights if available) ─────────────────────────────
         model.eval()
+        live_sd = None
+        if ema is not None:
+            live_sd = {k: v.detach().clone() for k, v in model.state_dict().items()}
+            model.load_state_dict(ema.state_dict_for(model))
         v_loss = 0.0; v_corr = 0.0; v_tok = 0
         with torch.no_grad():
             for batch in val_loader:
@@ -178,12 +218,17 @@ def main() -> None:
         if val_loss < best["val_loss"]:
             best = {"val_loss": val_loss, "val_acc": val_acc, "epoch": epoch}
             args.output.parent.mkdir(parents=True, exist_ok=True)
+            # save whatever weights are currently in `model` — that's EMA if enabled.
             torch.save({
                 "model_state_dict": model.state_dict(),
                 "config": cfg.__dict__,
                 "args": vars(args),
             }, args.output)
-            print(f"        ↳ new best, saved -> {args.output}")
+            print(f"        \u21b3 new best, saved -> {args.output}")
+
+        # restore live (training) weights for next epoch
+        if live_sd is not None:
+            model.load_state_dict(live_sd)
 
     RUNS_DIR.mkdir(parents=True, exist_ok=True)
     out = RUNS_DIR / "momask_base.json"
