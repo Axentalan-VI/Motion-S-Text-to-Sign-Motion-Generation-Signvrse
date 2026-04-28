@@ -75,8 +75,8 @@ def main() -> None:
     p.add_argument("--rows", type=int, default=3)
     p.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
     p.add_argument("--seed", type=int, default=42)
-    p.add_argument("--strides", type=str, default="1,2,1,2")
-    p.add_argument("--activation", type=str, default="leaky_relu")
+    p.add_argument("--strides", type=str, default="1,1,2,2")
+    p.add_argument("--activation", type=str, default="relu")
     p.add_argument("--codebook", type=str, default="embedding",
                    choices=["embedding", "embedding_avg"])
     p.add_argument("--ckpt", type=str, default=str(RVQ_VAE_CKPT))
