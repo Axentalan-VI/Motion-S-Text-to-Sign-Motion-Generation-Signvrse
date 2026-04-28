@@ -264,6 +264,28 @@ class Evaluator:
         out = self.module.motion_projector(pooled)               # (B, 256)
         return F.normalize(out, dim=-1)
 
+    # -- motion path from tokens (no raw features needed) -------------------
+    @torch.no_grad()
+    def tokens_embed(self, tokens_list: list) -> torch.Tensor:
+        """tokens_list: list of length B, each item shape (L, T_i) long
+        (L = num_quantizers, T_i = sequence length, can vary per sample).
+        Reconstructs latents via RVQ codebook lookup, mean-pools over time,
+        runs through motion_projector, returns (B, 256) normalized.
+        """
+        rvq = self.module.rvq_vae.rvq
+        embs = []
+        for tk in tokens_list:
+            tk = tk.to(self.device)
+            if tk.ndim != 2:
+                raise ValueError(f"each tokens entry must be (L, T); got {tuple(tk.shape)}")
+            tk = tk.unsqueeze(0)                                  # (1, L, T)
+            z = rvq.decode(tk)                                    # (1, 256, T)
+            pooled = z.mean(-1)                                   # (1, 256)
+            embs.append(pooled)
+        pooled = torch.cat(embs, dim=0)                           # (B, 256)
+        out = self.module.motion_projector(pooled)
+        return F.normalize(out, dim=-1)
+
     # -- scoring -------------------------------------------------------------
     @torch.no_grad()
     def cosine(self, text_emb: torch.Tensor, motion_emb: torch.Tensor) -> torch.Tensor:
