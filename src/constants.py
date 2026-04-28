@@ -41,8 +41,10 @@ RUNS_DIR: Path = REPO_ROOT / "runs"
 TRAIN_CSV: Path = DATA_DIR / "train.csv"
 TEST_CSV: Path = DATA_DIR / "test.csv"
 SAMPLE_SUBMISSION_CSV: Path = DATA_DIR / "sample_submission.csv"
-RVQ_VAE_CKPT: Path = DATA_DIR / "rvq_vae_best.pth"
-LENGTH_ESTIMATOR_CKPT: Path = DATA_DIR / "length_estimator.pth"
+RVQ_VAE_CKPT: Path = DATA_DIR / "rvq_vae" / "rvq_vae_best.pth"
+LENGTH_ESTIMATOR_CKPT: Path = DATA_DIR / "length_estimator" / "length_estimator_best.pth"
+EVALUATOR_PUBLIC_CKPT: Path = DATA_DIR / "evaluator_t2m" / "Public_t2m_align.pth"
+EVALUATOR_INTERNAL_CKPT: Path = DATA_DIR / "evaluator_t2m" / "text_motion_align_best.pth"
 
 SPLIT_FILE: Path = DATA_DIR / "split_90_10.json"   # written by scripts/make_split.py
 
