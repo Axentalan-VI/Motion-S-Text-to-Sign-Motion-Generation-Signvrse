@@ -39,29 +39,62 @@ def main():
     p.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
     p.add_argument("--n", type=int, default=32, help="number of samples")
     p.add_argument("--seed", type=int, default=42)
+    p.add_argument("--proj-act", type=str, default="relu")
+    p.add_argument("--proj-arch", type=str, default="v1",
+                   choices=["v1", "v2", "v3", "v4"])
+    p.add_argument("--sweep", action="store_true",
+                   help="try all (proj_arch x proj_act) combinations")
     args = p.parse_args()
 
     torch.manual_seed(args.seed)
     rng = np.random.default_rng(args.seed)
 
-    print(f"[val] loading evaluator from {args.ckpt}")
-    ev = Evaluator(args.ckpt, clip_name=args.clip, device=args.device)
-
     print("[val] loading train.csv ...")
     df = load_train()
     idx = rng.choice(len(df), size=args.n, replace=False)
     rows = df.iloc[idx].reset_index(drop=True)
-
     sentences = rows["sentence"].astype(str).tolist()
     tokens_list = []
     for _, r in rows.iterrows():
-        layers = [r[c] for c in TOKEN_COLUMNS]      # each (T,)
+        layers = [r[c] for c in TOKEN_COLUMNS]
         T = len(layers[0])
         if T == 0:
             tokens_list.append(torch.zeros(len(layers), 1, dtype=torch.long))
             continue
-        tk = torch.tensor(np.stack(layers, axis=0), dtype=torch.long)   # (L, T)
+        tk = torch.tensor(np.stack(layers, axis=0), dtype=torch.long)
         tokens_list.append(tk)
+
+    if args.sweep:
+        archs = ["v1", "v2", "v3", "v4"]
+        acts = ["relu", "gelu", "silu", "elu", "leaky_relu", "identity"]
+        results = []
+        for arch in archs:
+            for act in acts:
+                ev = Evaluator(args.ckpt, clip_name=args.clip, device=args.device,
+                               proj_act=act, proj_arch=arch)
+                te = ev.text_embed(sentences)
+                me = ev.tokens_embed(tokens_list)
+                sim = ev.cosine(te, me).cpu().numpy()
+                diag = np.diag(sim)
+                off = (sim.sum() - diag.sum()) / (sim.size - sim.shape[0])
+                ranks = (-sim).argsort(axis=1)
+                pos = (ranks == np.arange(args.n)[:, None]).argmax(axis=1)
+                r1 = (pos == 0).mean(); r5 = (pos < 5).mean()
+                med = float(np.median(pos)) + 1
+                gap = diag.mean() - off
+                results.append((r1, r5, gap, med, arch, act))
+                print(f"  arch={arch} act={act:<10} R@1={r1:.3f} R@5={r5:.3f} gap={gap:+.3f} median={med:.1f}")
+                del ev
+        print()
+        results.sort(key=lambda x: (-x[0], -x[1]))
+        print("[sweep] top 10 by R@1:")
+        for r1, r5, gap, med, arch, act in results[:10]:
+            print(f"  R@1={r1:.3f}  R@5={r5:.3f}  gap={gap:+.3f}  median={med:.1f}  arch={arch}  act={act}")
+        return
+
+    print(f"[val] loading evaluator (arch={args.proj_arch} act={args.proj_act}) ...")
+    ev = Evaluator(args.ckpt, clip_name=args.clip, device=args.device,
+                   proj_act=args.proj_act, proj_arch=args.proj_arch)
 
     print(f"[val] embedding {args.n} text-motion pairs ...")
     te = ev.text_embed(sentences)              # (N, 256)
@@ -75,7 +108,7 @@ def main():
 
     # R@k along rows: text_i ranked over all motions
     ranks = (-sim).argsort(axis=1)
-    correct_pos = (ranks == np.arange(args.n)[:, None]).argmax(axis=1)  # rank of matching motion
+    correct_pos = (ranks == np.arange(args.n)[:, None]).argmax(axis=1)
     r_at_1 = (correct_pos == 0).mean()
     r_at_5 = (correct_pos < 5).mean()
     r_at_10 = (correct_pos < 10).mean()

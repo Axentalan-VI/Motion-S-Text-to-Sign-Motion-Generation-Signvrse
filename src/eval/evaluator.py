@@ -85,16 +85,23 @@ class _MotionProjector(nn.Module):
         fc2.weight  (512, 512)   fc2.bias  (512,)
         fc3.weight  (256, 512)   fc3.bias  (256,)
         skip.weight (512, 256)   skip.bias (512,)
+
+    Several plausible residual layouts; selectable via `arch`:
+        "v1": h = act(fc1(x)) + skip(x);  h = act(fc2(h));         z = fc3(h)
+        "v2": h = act(fc1(x));            h = act(fc2(h)) + skip(x); z = fc3(h)
+        "v3": h = fc1(x) + skip(x);       h = act(h); h = act(fc2(h)); z = fc3(h)
+        "v4": h = act(fc1(x));            h = fc2(h) + skip(x); h = act(h); z = fc3(h)
     """
 
     def __init__(self, in_dim: int = 256, hidden: int = 512, out_dim: int = 256,
-                 activation: str = "relu"):
+                 activation: str = "relu", arch: str = "v1"):
         super().__init__()
         self.fc1 = nn.Linear(in_dim, hidden)
         self.fc2 = nn.Linear(hidden, hidden)
         self.fc3 = nn.Linear(hidden, out_dim)
         self.skip = nn.Linear(in_dim, hidden)
         self._act_name = activation
+        self._arch = arch
 
     def _act(self, x: torch.Tensor) -> torch.Tensor:
         if self._act_name == "relu":
@@ -107,12 +114,27 @@ class _MotionProjector(nn.Module):
             return F.silu(x)
         if self._act_name == "elu":
             return F.elu(x)
+        if self._act_name == "identity":
+            return x
         raise ValueError(self._act_name)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # x: (B, in_dim)
-        h = self._act(self.fc1(x)) + self.skip(x)
-        h = self._act(self.fc2(h))
+        if self._arch == "v1":
+            h = self._act(self.fc1(x)) + self.skip(x)
+            h = self._act(self.fc2(h))
+        elif self._arch == "v2":
+            h = self._act(self.fc1(x))
+            h = self._act(self.fc2(h)) + self.skip(x)
+        elif self._arch == "v3":
+            h = self.fc1(x) + self.skip(x)
+            h = self._act(h)
+            h = self._act(self.fc2(h))
+        elif self._arch == "v4":
+            h = self._act(self.fc1(x))
+            h = self.fc2(h) + self.skip(x)
+            h = self._act(h)
+        else:
+            raise ValueError(f"unknown arch: {self._arch}")
         return self.fc3(h)
 
 
@@ -167,7 +189,8 @@ class _PublicEvaluator(nn.Module):
     """
 
     def __init__(self, cfg: RVQVAEConfig, clip_name: str = "ViT-B/32",
-                 device: str = "cpu", proj_act: str = "relu"):
+                 device: str = "cpu", proj_act: str = "relu",
+                 proj_arch: str = "v1"):
         super().__init__()
         self.rvq_vae = _EvalRVQVAE(cfg)
         clip_model, _tok = _load_clip(clip_name, device=device)
@@ -183,7 +206,7 @@ class _PublicEvaluator(nn.Module):
             nn.Dropout(0.1),         # 7
             nn.Linear(256, 256),     # 8
         )
-        self.motion_projector = _MotionProjector(activation=proj_act)
+        self.motion_projector = _MotionProjector(activation=proj_act, arch=proj_arch)
         self.infonce_loss = _InfoNCELoss()
 
 
@@ -198,7 +221,8 @@ class Evaluator:
     """
 
     def __init__(self, ckpt_path: str | Path, cfg: RVQVAEConfig | None = None,
-                 clip_name: str = "ViT-B/32", device: str = "cpu"):
+                 clip_name: str = "ViT-B/32", device: str = "cpu",
+                 proj_act: str = "relu", proj_arch: str = "v1"):
         self.device = torch.device(device)
         ckpt = torch.load(str(ckpt_path), map_location="cpu")
         # The evaluator checkpoint also stores a `config` key, but that is the
@@ -208,7 +232,8 @@ class Evaluator:
         if cfg is None:
             cfg = RVQVAEConfig()
         self.cfg = cfg
-        self.module = _PublicEvaluator(cfg, clip_name=clip_name, device="cpu")
+        self.module = _PublicEvaluator(cfg, clip_name=clip_name, device="cpu",
+                                       proj_act=proj_act, proj_arch=proj_arch)
         sd = ckpt["model_state_dict"]
         # Try strict; fall back to non-strict on diagnostic load.
         missing, unexpected = self.module.load_state_dict(sd, strict=False)
