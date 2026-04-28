@@ -39,7 +39,7 @@ def _walk(obj, prefix: str = "") -> None:
     print(f"  {prefix:<60} <{type(obj).__name__}> {repr(obj)[:80]}")
 
 
-def peek(path: Path) -> None:
+def peek(path: Path, keys_only: bool = False) -> None:
     print(f"\n========== {path} ==========")
     if not path.exists():
         print("  (missing)")
@@ -48,6 +48,19 @@ def peek(path: Path) -> None:
     print(f"  top type: {type(obj).__name__}")
     if isinstance(obj, dict):
         print(f"  top-level keys: {list(obj.keys())}")
+        if keys_only:
+            # Only show model_state_dict shapes; skip optimizer/scheduler noise.
+            for k in ("model_state_dict", "state_dict"):
+                if k in obj:
+                    print(f"\n  -- {k} (keys-only) --")
+                    for kk, vv in obj[k].items():
+                        if hasattr(vv, "shape"):
+                            print(f"    {kk:<70} {tuple(vv.shape)}  {vv.dtype}")
+                        else:
+                            print(f"    {kk:<70} <{type(vv).__name__}>")
+                    return
+            print("  (no model_state_dict / state_dict found)")
+            return
         for k, v in obj.items():
             print(f"\n  -- {k} ({type(v).__name__}) --")
             if isinstance(v, dict) and v and all(hasattr(t, "shape") for t in v.values()):
@@ -65,17 +78,19 @@ def main() -> None:
     p.add_argument("path", nargs="?", help="path to a .pth file")
     p.add_argument("--all", action="store_true",
                    help="peek every known checkpoint listed in src/constants.py")
+    p.add_argument("--keys-only", action="store_true",
+                   help="only dump model_state_dict tensor shapes (skip optimizer)")
     args = p.parse_args()
 
     if args.all:
         for ck in [RVQ_VAE_CKPT, LENGTH_ESTIMATOR_CKPT,
                    EVALUATOR_PUBLIC_CKPT, EVALUATOR_INTERNAL_CKPT]:
-            peek(Path(ck))
+            peek(Path(ck), keys_only=args.keys_only)
         return
 
     if not args.path:
         p.error("provide a path or --all")
-    peek(Path(args.path))
+    peek(Path(args.path), keys_only=args.keys_only)
 
 
 if __name__ == "__main__":
