@@ -127,17 +127,17 @@ class _Decoder(nn.Module):
         n = len(c_in_out)
         layers: list[nn.Module] = []
         for i, ((cin, cout), s) in enumerate(zip(c_in_out, strides_rev)):
-            layers += [
+            layers.append(
                 nn.ConvTranspose1d(
                     cin, cout, kernel_size=kernel, stride=s,
                     padding=pad, output_padding=(s - 1),
-                ),
-                _make_act(activation),
-            ]
-            # No BatchNorm after the final output projection (standard for VAE
-            # decoders writing raw motion features). Checkpoint has slots 0..10
-            # only — slot 11 (final BN) does not exist.
+                )
+            )
+            # Final block: just ConvTranspose1d (no Act, no BN). The checkpoint
+            # has slots 0..9 only — the trainer writes raw motion features
+            # without any post-processing on the output projection.
             if i < n - 1:
+                layers.append(_make_act(activation))
                 layers.append(nn.BatchNorm1d(cout))
         self.decoder = nn.Sequential(*layers)
 
