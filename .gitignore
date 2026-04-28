@@ -6,8 +6,8 @@ __pycache__/
 .ipynb_checkpoints/
 
 # Data & artifacts (do not commit competition data)
-data/
-!data/.gitkeep
+/data/
+!/data/.gitkeep
 checkpoints/
 runs/
 wandb/
@@ -19,8 +19,8 @@ wandb/
 
 # Submissions
 submissions/
-*.csv
-!data/sample_submission.csv
+/*.csv
+!/data/sample_submission.csv
 
 # IDE
 .vscode/
