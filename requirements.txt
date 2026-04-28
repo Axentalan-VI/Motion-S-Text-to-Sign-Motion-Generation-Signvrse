@@ -1,0 +1,33 @@
+# Core
+numpy>=1.24
+pandas>=2.0
+pyyaml>=6.0
+tqdm>=4.66
+scikit-learn>=1.3
+
+# Deep learning
+torch>=2.1
+torchvision>=0.16
+einops>=0.7
+
+# NLP / text encoders
+transformers>=4.40
+tokenizers>=0.15
+sentencepiece>=0.1.99
+ftfy>=6.1
+regex
+
+# CLIP (for text encoder option in MoMask)
+open_clip_torch>=2.24
+
+# Motion / BVH (only if we touch raw BVH; tokens are pre-computed)
+# bvh-converter
+# smplx
+
+# Eval / utilities
+matplotlib>=3.7
+seaborn>=0.13
+
+# Notebook
+jupyter
+ipykernel

@@ -1,0 +1,71 @@
+# Default hyperparameters. Override per-experiment by copying this file
+# and editing what changes.
+
+seed: 42
+device: cuda
+
+paths:
+  data_dir: data
+  checkpoints: checkpoints
+  runs: runs
+
+text:
+  encoder: clip          # one of: clip | t5
+  clip_model: ViT-L-14
+  clip_pretrained: openai
+  t5_model: t5-base
+  use_sentence: true
+  use_gloss: true
+  gloss_weight: 0.7      # gloss is closer to motion grammar -> upweight
+  max_text_tokens: 64
+
+length_predictor:
+  mode: classification   # classification | regression
+  num_bins: 32           # bins span [40, 800]; bin width ~ 24 tokens
+  hidden: 512
+  dropout: 0.1
+
+momask:
+  base:
+    d_model: 512
+    n_layers: 12
+    n_heads: 8
+    dropout: 0.1
+    mask_schedule: cosine
+    cfg_scale: 4.0
+    decode_steps: 10
+  residual:
+    d_model: 384
+    n_layers: 8
+    n_heads: 8
+    dropout: 0.1
+
+t2mgpt:
+  base:
+    d_model: 768
+    n_layers: 12
+    n_heads: 8
+    dropout: 0.1
+    top_p: 0.9
+    temperature: 0.9
+    cfg_scale: 3.0
+  residual:
+    d_model: 384
+    n_layers: 6
+    n_heads: 8
+    dropout: 0.1
+
+train:
+  batch_size: 64
+  lr: 2.0e-4
+  weight_decay: 0.01
+  warmup_steps: 1000
+  max_steps: 100000
+  grad_clip: 1.0
+  amp: bf16
+  log_every: 50
+  eval_every: 1000
+
+infer:
+  num_candidates: 4      # K for best-of-N rerank
+  rerank: r_precision_proxy

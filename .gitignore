@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.ipynb_checkpoints/
+
+# Data & artifacts (do not commit competition data)
+data/
+!data/.gitkeep
+checkpoints/
+runs/
+wandb/
+*.pth
+*.pt
+*.ckpt
+*.npy
+*.bvh
+
+# Submissions
+submissions/
+*.csv
+!data/sample_submission.csv
+
+# IDE
+.vscode/
+.idea/
+.DS_Store
