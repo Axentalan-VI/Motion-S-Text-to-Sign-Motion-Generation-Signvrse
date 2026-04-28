@@ -27,7 +27,7 @@ from src.constants import (
 from src.data.io import load_train
 from src.eval.evaluator import Evaluator
 from src.eval.local_score import score_predictions
-from src.length import LengthPredictor, bin_to_seq_len, seq_len_to_bin
+from src.length import LengthPredictor, bin_to_seq_len, load_head, seq_len_to_bin
 from src.models.momask import (
     BaseMaskTransformer, MoMaskConfig, ResidualTransformer,
 )
@@ -101,11 +101,9 @@ def main() -> None:
         tok = AutoTokenizer.from_pretrained(backbone)
         len_model = LengthPredictor(num_bins=base_cfg.num_length_bins,
                                      backbone_name=backbone,
-                                     freeze_backbone=True).to(device)
-        sd = torch.load(str(args.length_ckpt), map_location="cpu", weights_only=False)
-        if "model_state_dict" in sd:
-            sd = sd["model_state_dict"]
-        len_model.load_state_dict(sd, strict=False)
+                                     freeze_backbone=True)
+        load_head(len_model, str(args.length_ckpt))
+        len_model = len_model.to(device)
         len_model.eval()
         len_max_text_tokens = 64
 

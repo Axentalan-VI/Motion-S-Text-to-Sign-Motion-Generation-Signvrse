@@ -300,14 +300,18 @@ class ResidualTransformer(nn.Module):
         self.head = nn.Linear(cfg.d_model, CODEBOOK_SIZE, bias=False)
 
     def _embed_prev_layers(self, prev_tokens: torch.Tensor) -> torch.Tensor:
-        """prev_tokens: (B, L_prev, T) ints in [0, CODEBOOK). Returns (B, T, d).
+        """prev_tokens: (B, L_prev, T) ints. Returns (B, T, d).
         Sums per-layer embeddings so the model sees the full state so far.
+        Out-of-vocab ids (e.g. PAD_ID=513 in padded positions, or MASK_ID=512
+        leftover from the base decoder) are clamped to 0 — the loss/logits
+        on padded positions are masked out by the caller anyway.
         """
         B, Lp, T = prev_tokens.shape
         out = torch.zeros(B, T, self.cfg.d_model, device=prev_tokens.device,
                           dtype=self.tok_emb[0].weight.dtype)
+        safe = prev_tokens.clamp(min=0, max=CODEBOOK_SIZE - 1)
         for li in range(Lp):
-            out = out + self.tok_emb[li](prev_tokens[:, li])
+            out = out + self.tok_emb[li](safe[:, li])
         return out
 
     def forward(self, prev_tokens: torch.Tensor, target_layer: torch.Tensor,
