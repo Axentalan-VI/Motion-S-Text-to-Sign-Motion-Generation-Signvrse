@@ -82,8 +82,8 @@ class _Encoder(nn.Module):
     """
 
     def __init__(self, input_dim: int, hidden: int, latent_dim: int,
-                 strides: tuple[int, int, int, int] = (1, 2, 1, 2),
-                 kernel: int = 3, activation: str = "leaky_relu"):
+                 strides: tuple[int, int, int, int] = (2, 2, 1, 1),
+                 kernel: int = 3, activation: str = "elu"):
         super().__init__()
         pad = kernel // 2
         c_in_out = [
@@ -112,8 +112,8 @@ class _Decoder(nn.Module):
     """
 
     def __init__(self, latent_dim: int, hidden: int, output_dim: int,
-                 strides: tuple[int, int, int, int] = (1, 2, 1, 2),
-                 kernel: int = 3, activation: str = "leaky_relu"):
+                 strides: tuple[int, int, int, int] = (2, 2, 1, 1),
+                 kernel: int = 3, activation: str = "elu"):
         super().__init__()
         pad = kernel // 2
         c_in_out = [
@@ -269,8 +269,8 @@ class FrozenRVQVAE(nn.Module):
 
     def __init__(self, ckpt_path: str | Path = RVQ_VAE_CKPT,
                  cfg: RVQVAEConfig | None = None,
-                 activation: str = "leaky_relu",
-                 strides: tuple[int, int, int, int] = (1, 2, 1, 2),
+                 activation: str = "elu",
+                 strides: tuple[int, int, int, int] = (2, 2, 1, 1),
                  codebook_source: str = "embedding"):
         super().__init__()
         self.ckpt_path = Path(ckpt_path)
