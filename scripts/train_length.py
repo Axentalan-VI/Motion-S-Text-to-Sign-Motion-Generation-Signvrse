@@ -27,6 +27,7 @@ from src.constants import (
     SPLIT_FILE,
     TRAIN_CSV,
 )
+from src.drive_sync import mirror_to_drive
 from src.length import (
     LengthDataset,
     LengthPredictor,
@@ -61,6 +62,8 @@ def main() -> None:
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
     p.add_argument("--output", type=Path, default=Path(CHECKPOINT_DIR) / "length_predictor.pth")
+    p.add_argument("--drive-dir", type=str, default=None,
+                   help="If set, mirror checkpoint here after every save.")
     args = p.parse_args()
 
     torch.manual_seed(args.seed)
@@ -171,6 +174,7 @@ def main() -> None:
             best = {"val_mae": val_mae, "val_acc": val_acc, "epoch": epoch}
             save(model, args.output)
             print(f"        ↳ new best, saved -> {args.output}")
+            mirror_to_drive(args.output, args.drive_dir)
 
     # Also write a sibling copy at the canonical data-dir location used by inference.
     try:

@@ -27,6 +27,7 @@ from src.constants import (
     CHECKPOINT_DIR, NUM_LAYERS, RUNS_DIR, SPLIT_FILE, TRAIN_CSV,
 )
 from src.data.io import load_train
+from src.drive_sync import mirror_to_drive
 from src.models.data import TokenSeqDataset, collate_token_batch
 from src.models.momask import (
     MoMaskConfig, ResidualTransformer, PAD_ID,
@@ -60,6 +61,8 @@ def main() -> None:
     p.add_argument("--log-every", type=int, default=50)
     p.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
     p.add_argument("--output", type=Path, default=Path(CHECKPOINT_DIR) / "momask_residual.pth")
+    p.add_argument("--drive-dir", type=str, default=None,
+                   help="If set, mirror checkpoint here after every save.")
     args = p.parse_args()
 
     torch.manual_seed(args.seed)
@@ -222,6 +225,7 @@ def main() -> None:
                 "args": vars(args),
             }, args.output)
             print(f"        ↳ new best, saved -> {args.output}")
+            mirror_to_drive(args.output, args.drive_dir)
 
     RUNS_DIR.mkdir(parents=True, exist_ok=True)
     out = RUNS_DIR / "momask_residual.json"
