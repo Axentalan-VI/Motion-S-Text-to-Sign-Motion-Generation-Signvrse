@@ -1,65 +1,124 @@
 # Motion-S: Hierarchical Text-to-Sign Motion Generation
 
-Solution scaffold for the [Kaggle competition](https://www.kaggle.com/competitions/motion-s-hierarchical-text-to-motion-generation-for-sign-language).
+This repository implements a discrete-token pipeline for the [Kaggle Motion-S competition](https://www.kaggle.com/competitions/motion-s-hierarchical-text-to-motion-generation-for-sign-language). The goal is to map English text and gloss into a 6-layer RVQ token grid that can be decoded into sign motion by the organizer-provided frozen RVQ-VAE.
 
-## Task
-Given an English `sentence` and `gloss` (sign-language gloss), generate **6 RVQ token layers** (`base_tokens`, `residual_1..residual_5`), each token ∈ [0, 511], total length per sequence ∈ [40, 800], for 3000 test rows. The provided `rvq_vae_best.pth` is the frozen decoder — do not modify or replace.
+## Project overview
 
-**Score** = 0.30·FID + 0.50·R-Precision + 0.20·Diversity (in a learned feature space).
+The project uses a 3-stage architecture:
 
-## Strategy
-Train two complementary text→tokens generators on Colab Pro/Pro+ and ensemble at inference time on Kaggle (T4/P100, 9 h, internet disabled):
-1. **Model A — MoMask-style**: masked transformer for the base layer + residual transformer for layers 1–5. Iterative parallel decoding with classifier-free guidance.
-2. **Model B — T2M-GPT-style**: causal autoregressive transformer for the base layer + small AR residual heads. Nucleus sampling + CFG.
-3. **Ensemble**: per-row, generate K=4 candidates and rerank by a local R-Precision proxy (best-of-N).
+1. **Frozen RVQ tokenizer**
+   - Encodes motion into 6 token layers with codebook size 512.
+   - Decodes predicted tokens back into motion.
+   - The checkpoint is fixed and is used only for encode/decode.
 
-R-Precision is 50% of the score, so text–motion alignment is the dominant lever.
+2. **Length predictor**
+   - A DistilBERT-based classifier that predicts one of 32 sequence-length bins.
+   - Provides the target motion duration before token generation.
 
-## Layout
-```
-configs/                # YAML hyperparameters per model/run
-data/                   # Kaggle dataset (gitignored). Place rvq_vae_best.pth, train.csv, test.csv here
-notebooks/              # exploration + final Kaggle inference notebook
+3. **MoMask token generator**
+   - **Base transformer** predicts layer 0 with iterative masked-token decoding.
+   - **Residual transformer** predicts layers 1 through 5 conditioned on the lower layers.
+
+This decomposition makes the task easier than generating raw motion frames directly: the model first predicts duration, then a coarse discrete motion plan, then progressively refines it.
+
+## Competition task
+
+For each test row, generate:
+
+- `base_tokens`
+- `residual_1`
+- `residual_2`
+- `residual_3`
+- `residual_4`
+- `residual_5`
+
+Each token is an integer in `[0, 511]`, and each sequence length must stay within `[40, 800]`.
+
+The competition score is:
+
+- `0.30 * FID`
+- `0.50 * R-Precision`
+- `0.20 * Diversity`
+
+Text-motion alignment is the main optimization target because R-Precision has the highest weight.
+
+## Repository structure
+
+```text
+configs/                YAML hyperparameters
+data/                   competition data and frozen checkpoints
+scripts/                training, validation, and debugging entrypoints
 src/
-  data/                 # loaders, train/val split, inspection
-  eval/                 # local proxy scorer + submission validator
-  infer/                # ensemble + rerank
-  models/               # momask.py, t2mgpt.py
-  rvq.py                # frozen RVQ-VAE wrapper (encode/decode only)
-  length.py             # text-to-length predictor
-scripts/                # CLI entrypoints (train, predict, validate, ensemble)
+  data/                 dataset loading and split helpers
+  eval/                 local scoring and submission validation
+  infer/                inference utilities
+  models/               MoMask models, text conditioning, token datasets
+  constants.py          shared paths and constants
+  length.py             length predictor model
+  rvq.py                frozen RVQ-VAE wrapper
 ```
 
-## Setup
+## Required data files
+
+Place the competition assets under `data/`:
+
+```text
+data/
+  train.csv
+  test.csv
+  sample_submission.csv
+  rvq_vae_best.pth
+  evaluation_script.py
+```
+
+Optional local artifacts created by training include:
+
+```text
+data/
+  length_estimator.pth
+checkpoints/
+  momask_base.pth
+  momask_residual.pth
+```
+
+## Environment setup
+
 ```powershell
 python -m venv .venv
 .venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 ```
 
-Place competition files under `data/`:
-```
-data/
-  train.csv
-  test.csv
-  sample_submission.csv
-  rvq_vae_best.pth
-  length_estimator.pth
-  evaluation_script.py
-  baseline_notebook.ipynb
-```
+## Typical workflow
 
-## Quick commands
+Inspect and prepare the dataset:
+
 ```powershell
-# 1. Validate a submission file (works without the model)
-python -m scripts.validate_submission data\sample_submission.csv
-
-# 2. Inspect dataset (run once)
 python -m scripts.inspect_data
-
-# 3. Build a frozen 90/10 train/val split
 python -m scripts.make_split
 ```
 
-## Status
-Phase 0 — scaffolding done; awaiting Kaggle data download.
+Train the length predictor:
+
+```powershell
+python -m scripts.train_length --epochs 8 --batch-size 64
+```
+
+Train the MoMask models:
+
+```powershell
+python -m scripts.train_momask_base --epochs 30 --batch-size 32
+python -m scripts.train_momask_residual --epochs 10 --batch-size 32
+```
+
+Validate checkpoints and submissions:
+
+```powershell
+python -m scripts.test_rvq
+python -m scripts.test_momask
+python -m scripts.validate_submission data\sample_submission.csv
+```
+
+## Current scope
+
+This codebase is centered on the MoMask-style hierarchical generator and its supporting tooling for training, validation, and submission checks. The RVQ model remains frozen throughout.

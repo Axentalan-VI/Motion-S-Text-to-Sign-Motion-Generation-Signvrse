@@ -64,6 +64,8 @@ def main() -> None:
     p.add_argument("--output", type=Path, default=Path(CHECKPOINT_DIR) / "length_predictor.pth")
     p.add_argument("--drive-dir", type=str, default=None,
                    help="If set, mirror checkpoint here after every save.")
+    p.add_argument("--resume", type=Path, default=None,
+                   help="Path to existing checkpoint to resume training from.")
     args = p.parse_args()
 
     torch.manual_seed(args.seed)
@@ -126,8 +128,21 @@ def main() -> None:
 
     best = {"val_mae": math.inf, "val_acc": 0.0, "epoch": -1}
     history: list[dict] = []
+    start_epoch = 0
 
-    for epoch in range(args.epochs):
+    if args.resume is not None and Path(args.resume).exists():
+        ck = torch.load(str(args.resume), map_location="cpu", weights_only=False)
+        model.head.load_state_dict(ck["head"])
+        if "optimizer_state_dict" in ck:
+            opt.load_state_dict(ck["optimizer_state_dict"])
+        if "scheduler_state_dict" in ck:
+            sched.load_state_dict(ck["scheduler_state_dict"])
+        start_epoch = ck.get("epoch", -1) + 1
+        best = ck.get("best", best)
+        history = ck.get("history", [])
+        print(f"[resume] epoch {start_epoch}, val_mae={best['val_mae']:.1f} from {args.resume}")
+
+    for epoch in range(start_epoch, args.epochs):
         model.head.train(); model.backbone.eval()
         train_loss_sum = 0.0; n_seen = 0
         for batch in train_loader:
@@ -172,7 +187,10 @@ def main() -> None:
 
         if val_mae < best["val_mae"]:
             best = {"val_mae": val_mae, "val_acc": val_acc, "epoch": epoch}
-            save(model, args.output)
+            save(model, args.output,
+                 optimizer_state_dict=opt.state_dict(),
+                 scheduler_state_dict=sched.state_dict(),
+                 epoch=epoch, best=best, history=history)
             print(f"        ↳ new best, saved -> {args.output}")
             mirror_to_drive(args.output, args.drive_dir)
 

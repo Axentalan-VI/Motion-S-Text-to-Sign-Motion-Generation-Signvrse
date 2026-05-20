@@ -137,9 +137,9 @@ class LengthPredictor(nn.Module):
         return torch.tensor(bin_to_seq_len(bins, self.num_bins), dtype=torch.long)
 
 
-def save(model: LengthPredictor, path: Path | str = LENGTH_ESTIMATOR_CKPT) -> None:
+def save(model: LengthPredictor, path: Path | str = LENGTH_ESTIMATOR_CKPT, **extra) -> None:
     Path(path).parent.mkdir(parents=True, exist_ok=True)
-    torch.save({"head": model.head.state_dict(), "num_bins": model.num_bins}, path)
+    torch.save({"head": model.head.state_dict(), "num_bins": model.num_bins, **extra}, path)
 
 
 def load_head(model: LengthPredictor, path: Path | str = LENGTH_ESTIMATOR_CKPT) -> LengthPredictor:

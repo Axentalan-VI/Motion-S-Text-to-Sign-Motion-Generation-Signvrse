@@ -63,6 +63,8 @@ def main() -> None:
     p.add_argument("--output", type=Path, default=Path(CHECKPOINT_DIR) / "momask_residual.pth")
     p.add_argument("--drive-dir", type=str, default=None,
                    help="If set, mirror checkpoint here after every save.")
+    p.add_argument("--resume", type=Path, default=None,
+                   help="Path to existing checkpoint to resume training from.")
     args = p.parse_args()
 
     torch.manual_seed(args.seed)
@@ -108,10 +110,23 @@ def main() -> None:
 
     history: list[dict] = []
     best = {"val_loss": math.inf, "val_acc": 0.0, "epoch": -1}
+    start_epoch = 0
+
+    if args.resume is not None and Path(args.resume).exists():
+        ck = torch.load(str(args.resume), map_location="cpu", weights_only=False)
+        model.load_state_dict(ck["model_state_dict"])
+        if "optimizer_state_dict" in ck:
+            opt.load_state_dict(ck["optimizer_state_dict"])
+        if "scheduler_state_dict" in ck:
+            sched.load_state_dict(ck["scheduler_state_dict"])
+        start_epoch = ck.get("epoch", -1) + 1
+        best = ck.get("best", best)
+        history = ck.get("history", [])
+        print(f"[resume] epoch {start_epoch}, val_loss={best['val_loss']:.3f} from {args.resume}")
 
     n_residual = NUM_LAYERS - 1                     # 5
 
-    for epoch in range(args.epochs):
+    for epoch in range(start_epoch, args.epochs):
         model.train()
         sum_loss = 0.0; sum_corr = 0.0; sum_tok = 0
         per_layer_corr = [0] * n_residual; per_layer_tok = [0] * n_residual
@@ -221,6 +236,11 @@ def main() -> None:
             args.output.parent.mkdir(parents=True, exist_ok=True)
             torch.save({
                 "model_state_dict": model.state_dict(),
+                "optimizer_state_dict": opt.state_dict(),
+                "scheduler_state_dict": sched.state_dict(),
+                "epoch": epoch,
+                "best": best,
+                "history": history,
                 "config": cfg.__dict__,
                 "args": vars(args),
             }, args.output)

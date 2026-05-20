@@ -120,12 +120,6 @@ def main() -> None:
     )
     model = BaseMaskTransformer(cfg).to(device)
     text_enc = FrozenTextEncoder(name=args.clip_name, device=str(device))
-
-    if args.resume is not None and Path(args.resume).exists():
-        ck = torch.load(str(args.resume), map_location="cpu", weights_only=False)
-        model.load_state_dict(ck["model_state_dict"])
-        print(f"[resume] loaded weights from {args.resume}")
-
     ema = _EMA(model, decay=args.ema) if args.ema and args.ema > 0 else None
     if ema is not None:
         print(f"[ema] enabled, decay={args.ema}")
@@ -140,8 +134,23 @@ def main() -> None:
 
     history: list[dict] = []
     best = {"val_loss": math.inf, "val_acc": 0.0, "epoch": -1}
+    start_epoch = 0
 
-    for epoch in range(args.epochs):
+    if args.resume is not None and Path(args.resume).exists():
+        ck = torch.load(str(args.resume), map_location="cpu", weights_only=False)
+        model.load_state_dict(ck["model_state_dict"])
+        if "optimizer_state_dict" in ck:
+            opt.load_state_dict(ck["optimizer_state_dict"])
+        if "scheduler_state_dict" in ck:
+            sched.load_state_dict(ck["scheduler_state_dict"])
+        if ema is not None and "ema_shadow" in ck and ck["ema_shadow"] is not None:
+            ema.shadow = {k: v.to(device) for k, v in ck["ema_shadow"].items()}
+        start_epoch = ck.get("epoch", -1) + 1
+        best = ck.get("best", best)
+        history = ck.get("history", [])
+        print(f"[resume] epoch {start_epoch}, val_loss={best['val_loss']:.3f} from {args.resume}")
+
+    for epoch in range(start_epoch, args.epochs):
         # ── train ─────────────────────────────────────────────────────────
         model.train()
         sum_loss = 0.0; sum_corr = 0.0; sum_tok = 0
@@ -221,9 +230,15 @@ def main() -> None:
         if val_loss < best["val_loss"]:
             best = {"val_loss": val_loss, "val_acc": val_acc, "epoch": epoch}
             args.output.parent.mkdir(parents=True, exist_ok=True)
-            # save whatever weights are currently in `model` — that's EMA if enabled.
+            # save EMA weights (currently loaded into model) + full training state
             torch.save({
                 "model_state_dict": model.state_dict(),
+                "optimizer_state_dict": opt.state_dict(),
+                "scheduler_state_dict": sched.state_dict(),
+                "ema_shadow": {k: v.cpu() for k, v in ema.shadow.items()} if ema is not None else None,
+                "epoch": epoch,
+                "best": best,
+                "history": history,
                 "config": cfg.__dict__,
                 "args": vars(args),
             }, args.output)

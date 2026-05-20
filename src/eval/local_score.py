@@ -98,25 +98,29 @@ def _matrix_sqrt(mat: np.ndarray) -> np.ndarray:
     return (v * np.sqrt(w)) @ v.T
 
 
-def fid(emb_a: torch.Tensor, emb_b: torch.Tensor, eps: float = 1e-6) -> float:
+def fid(emb_a: torch.Tensor, emb_b: torch.Tensor, eps: float = 1e-4) -> float:
     """FID between two sets of embeddings.
     emb_a, emb_b: (Na, D), (Nb, D) — typically a=generated, b=GT.
+
+    eps regularises both covariance matrices before any computation so that
+    the trace terms and the matrix-sqrt term are all consistent. Without this,
+    applying eps only inside the sqrt inflates tr_term while leaving
+    Tr(cov_a)+Tr(cov_b) unchanged, producing negative FID with small N.
     """
     a = emb_a.detach().cpu().numpy().astype(np.float64)
     b = emb_b.detach().cpu().numpy().astype(np.float64)
     mu_a = a.mean(0); mu_b = b.mean(0)
-    cov_a = np.cov(a, rowvar=False)
-    cov_b = np.cov(b, rowvar=False)
     diff = mu_a - mu_b
 
-    # Tr(A + B - 2 sqrt(AB)). AB isn't symmetric, but sqrt(sqrt(A) B sqrt(A)) is the
-    # canonical formulation; we use it directly.
-    sa = _matrix_sqrt(cov_a + eps * np.eye(cov_a.shape[0]))
-    inner = sa @ cov_b @ sa
-    sqrt_inner = _matrix_sqrt(inner + eps * np.eye(inner.shape[0]))
+    reg = eps * np.eye(a.shape[1])
+    cov_a = np.cov(a, rowvar=False) + reg
+    cov_b = np.cov(b, rowvar=False) + reg
+
+    sa = _matrix_sqrt(cov_a)
+    sqrt_inner = _matrix_sqrt(sa @ cov_b @ sa)
     tr_term = float(np.trace(sqrt_inner))
 
-    return float(diff @ diff + np.trace(cov_a) + np.trace(cov_b) - 2.0 * tr_term)
+    return max(0.0, float(diff @ diff + np.trace(cov_a) + np.trace(cov_b) - 2.0 * tr_term))
 
 
 # ---------------------------------------------------------------------------
