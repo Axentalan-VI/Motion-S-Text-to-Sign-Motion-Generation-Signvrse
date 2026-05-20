@@ -66,8 +66,24 @@ def main() -> None:
     p.add_argument("--length-ckpt", type=Path,
                    default=Path(CHECKPOINT_DIR) / "length_predictor.pth")
     p.add_argument("--clip-name", type=str, default="ViT-B/32")
-    p.add_argument("--evaluator-ckpt", type=Path, default=EVALUATOR_PUBLIC_CKPT)
+    p.add_argument("--evaluator-ckpt", type=Path, default=None,
+                   help="Path to evaluator checkpoint. Auto-detected if omitted.")
     args = p.parse_args()
+
+    # Auto-detect evaluator checkpoint — try both known filenames.
+    if args.evaluator_ckpt is None:
+        from src.constants import EVALUATOR_INTERNAL_CKPT
+        for candidate in (EVALUATOR_PUBLIC_CKPT, EVALUATOR_INTERNAL_CKPT):
+            if candidate.exists():
+                args.evaluator_ckpt = candidate
+                break
+        if args.evaluator_ckpt is None:
+            raise FileNotFoundError(
+                f"Evaluator checkpoint not found. Expected one of:\n"
+                f"  {EVALUATOR_PUBLIC_CKPT}\n"
+                f"  {EVALUATOR_INTERNAL_CKPT}\n"
+                "Run the evaluator download cell (fetch from Kaggle models) first."
+            )
 
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
