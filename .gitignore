@@ -26,3 +26,6 @@ submissions/
 .vscode/
 .idea/
 .DS_Store
+
+# Kaggle API credentials -- never commit
+kaggle.json
