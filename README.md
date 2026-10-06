@@ -4,8 +4,9 @@ This repository implements a discrete-token pipeline for the [Kaggle Motion-S co
 
 ## Result
 
-**0.433** on the competition metric, from the first submission. The competition
-is still running; this is the baseline the MoMask/T2M-GPT ensemble is measured
+**0.433** on the competition metric, from the first submission. The competition closed on
+2026-05-10 without a selected submission, so the entry is unranked among the
+130 teams. The 0.433 is the baseline the MoMask/T2M-GPT ensemble was measured
 against, not a tuned entry.
 
 ## Project overview
