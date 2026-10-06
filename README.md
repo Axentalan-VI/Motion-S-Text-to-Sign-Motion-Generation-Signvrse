@@ -2,6 +2,12 @@
 
 This repository implements a discrete-token pipeline for the [Kaggle Motion-S competition](https://www.kaggle.com/competitions/motion-s-hierarchical-text-to-motion-generation-for-sign-language). The goal is to map English text and gloss into a 6-layer RVQ token grid that can be decoded into sign motion by the organizer-provided frozen RVQ-VAE.
 
+## Result
+
+**0.433** on the competition metric, from the first submission. The competition
+is still running; this is the baseline the MoMask/T2M-GPT ensemble is measured
+against, not a tuned entry.
+
 ## Project overview
 
 The project uses a 3-stage architecture:
